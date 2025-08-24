@@ -1,0 +1,87 @@
+# Cloud Run deployment configuration for Odoo v18.0
+# This file defines the deployment settings for production and staging
+
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: summit-paragliding-odoo
+  annotations:
+    run.googleapis.com/ingress: all
+    run.googleapis.com/execution-environment: gen2
+spec:
+  template:
+    metadata:
+      annotations:
+        # Allocate more resources for Odoo
+        run.googleapis.com/memory: "2Gi"
+        run.googleapis.com/cpu: "2000m"
+        # Allow up to 1000 concurrent requests
+        run.googleapis.com/execution-environment: gen2
+        autoscaling.knative.dev/maxScale: "10"
+        autoscaling.knative.dev/minScale: "1"
+        # Connection timeout for long-running operations
+        run.googleapis.com/timeout: "3600s"
+    spec:
+      containerConcurrency: 1000
+      containers:
+      - image: gcr.io/PROJECT_ID/summit-paragliding-odoo:latest
+        ports:
+        - containerPort: 8080
+        env:
+        # Database configuration
+        - name: DB_HOST
+          value: "/cloudsql/PROJECT_ID:REGION:INSTANCE_NAME"
+        - name: DB_NAME
+          value: "summit_paragliding_prod"
+        - name: DB_USER
+          value: "odoo"
+        - name: DB_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: odoo-db-password
+              key: password
+        # Odoo configuration
+        - name: ADMIN_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: odoo-admin-password
+              key: password
+        - name: ADDONS_PATH
+          value: "/opt/odoo/addons,/mnt/extra-addons"
+        - name: CUSTOM_ADDONS_REPO
+          value: "https://github.com/Jay-Pel/Summit-Paragliding.git"
+        - name: CUSTOM_ADDONS_BRANCH
+          value: "main"
+        resources:
+          limits:
+            cpu: "2000m"
+            memory: "2Gi"
+          requests:
+            cpu: "1000m"
+            memory: "1Gi"
+        volumeMounts:
+        - name: cloudsql
+          mountPath: /cloudsql
+        livenessProbe:
+          httpGet:
+            path: /web/health
+            port: 8080
+          initialDelaySeconds: 300
+          periodSeconds: 30
+          timeoutSeconds: 10
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /web/health
+            port: 8080
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+      volumes:
+      - name: cloudsql
+        csi:
+          driver: gcp-cloudsql-postgres-driver
+          volumeAttributes:
+            databaseVersion: POSTGRES_15
+            instance: PROJECT_ID:REGION:INSTANCE_NAME
