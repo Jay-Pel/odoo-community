@@ -1,0 +1,90 @@
+# Cloud Build configuration for Odoo v18.0 deployment
+# Builds and deploys to Cloud Run automatically
+
+steps:
+  # Build the Docker image
+  - name: 'gcr.io/cloud-builders/docker'
+    args: [
+      'build',
+      '-t', 'gcr.io/$PROJECT_ID/summit-paragliding-odoo:$BRANCH_NAME',
+      '-t', 'gcr.io/$PROJECT_ID/summit-paragliding-odoo:$SHORT_SHA',
+      '.'
+    ]
+
+  # Push the Docker image to Container Registry
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', 'gcr.io/$PROJECT_ID/summit-paragliding-odoo:$BRANCH_NAME']
+  
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', 'gcr.io/$PROJECT_ID/summit-paragliding-odoo:$SHORT_SHA']
+
+  # Deploy to Cloud Run (Production)
+  - name: 'gcr.io/cloud-builders/gcloud'
+    entrypoint: bash
+    args:
+      - '-c'
+      - |
+        if [[ "$BRANCH_NAME" == "main" ]]; then
+          echo "Deploying to production environment..."
+          gcloud run deploy summit-paragliding-odoo-prod \
+            --image=gcr.io/$PROJECT_ID/summit-paragliding-odoo:$SHORT_SHA \
+            --platform=managed \
+            --region=us-central1 \
+            --allow-unauthenticated \
+            --service-account=odoo-cloud-run@$PROJECT_ID.iam.gserviceaccount.com \
+            --memory=2Gi \
+            --cpu=2 \
+            --timeout=3600 \
+            --concurrency=1000 \
+            --min-instances=1 \
+            --max-instances=10 \
+            --set-env-vars="DB_HOST=/cloudsql/$PROJECT_ID:us-central1:summit-paragliding-db" \
+            --set-env-vars="DB_NAME=summit-paragliding-prod" \
+            --set-env-vars="DB_USER=odoo" \
+            --set-env-vars="CUSTOM_ADDONS_REPO=https://github.com/Jay-Pel/Summit-Paragliding.git" \
+            --set-env-vars="CUSTOM_ADDONS_BRANCH=main" \
+            --set-secrets="DB_PASSWORD=odoo-db-password:latest" \
+            --set-secrets="ADMIN_PASSWORD=odoo-admin-password:latest" \
+            --add-cloudsql-instances="$PROJECT_ID:us-central1:summit-paragliding-db" \
+            --execution-environment=gen2
+        fi
+
+  # Deploy to Cloud Run (Staging)
+  - name: 'gcr.io/cloud-builders/gcloud'
+    entrypoint: bash
+    args:
+      - '-c'
+      - |
+        if [[ "$BRANCH_NAME" == "staging" ]] || [[ "$BRANCH_NAME" == "main" ]]; then
+          echo "Deploying to staging environment..."
+          gcloud run deploy summit-paragliding-odoo-staging \
+            --image=gcr.io/$PROJECT_ID/summit-paragliding-odoo:$SHORT_SHA \
+            --platform=managed \
+            --region=us-central1 \
+            --allow-unauthenticated \
+            --service-account=odoo-cloud-run@$PROJECT_ID.iam.gserviceaccount.com \
+            --memory=2Gi \
+            --cpu=2 \
+            --timeout=3600 \
+            --concurrency=1000 \
+            --min-instances=0 \
+            --max-instances=5 \
+            --set-env-vars="DB_HOST=/cloudsql/$PROJECT_ID:us-central1:summit-paragliding-db" \
+            --set-env-vars="DB_NAME=summit-paragliding-staging" \
+            --set-env-vars="DB_USER=odoo" \
+            --set-env-vars="CUSTOM_ADDONS_REPO=https://github.com/Jay-Pel/Summit-Paragliding.git" \
+            --set-env-vars="CUSTOM_ADDONS_BRANCH=staging" \
+            --set-secrets="DB_PASSWORD=odoo-db-password:latest" \
+            --set-secrets="ADMIN_PASSWORD=odoo-admin-password:latest" \
+            --add-cloudsql-instances="$PROJECT_ID:us-central1:summit-paragliding-db" \
+            --execution-environment=gen2
+        fi
+
+# Substitute variables from trigger
+substitutions:
+  _SERVICE_NAME: 'summit-paragliding-odoo'
+
+# Build options
+options:
+  logging: CLOUD_LOGGING_ONLY
+  machineType: 'E2_HIGHCPU_8'
